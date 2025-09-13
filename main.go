@@ -49,7 +49,7 @@ func main() {
     router.POST("/users", postUsers)
     router.POST("/login", login)
 
-    router.Run(":8080")
+    router.Run("localhost:8080")
 }
 
 func getUsers(c *gin.Context) {
