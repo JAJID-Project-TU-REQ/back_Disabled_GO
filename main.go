@@ -40,6 +40,14 @@ type userResponse struct {
     Special_request string `json:"special_request"`
 }
 
+type task struct {
+    TaskOwnerID   string  `json:"task_owner_id"`   // ID_NO of the owner
+    TaskName      string  `json:"task_name"`
+    DateTime      string  `json:"date_time"`       // Use time.Time if you want, but string for now
+    Location      string  `json:"location"`        // Store as string, e.g., "POINT(lon lat)"
+    MoreDetail    string  `json:"more_detail"`
+    TaskWorkerID  string  `json:"task_worker_id"`  // ID_NO of the worker
+}
 
 func main() {
     initDB()
@@ -48,6 +56,7 @@ func main() {
     router.GET("/users/:id", getUserByID)
     router.POST("/users", postUsers)
     router.POST("/login", login)
+    router.POST("/tasks", postTask)
 
     router.Run("localhost:8080")
 }
@@ -134,4 +143,22 @@ func login(c *gin.Context) {
     }
 
     c.JSON(http.StatusOK, gin.H{"message": "login successful"})
+}
+
+func postTask(c *gin.Context) {
+    var newTask task
+    if err := c.BindJSON(&newTask); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
+
+    _, err := db.Exec(
+        "INSERT INTO tasks (task_owner_id, task_name, date_time, location, more_detail, task_worker_id) VALUES (?, ?, ?, ?, ?, ?)",
+        newTask.TaskOwnerID, newTask.TaskName, newTask.DateTime, newTask.Location, newTask.MoreDetail, newTask.TaskWorkerID,
+    )
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+    c.IndentedJSON(http.StatusCreated, newTask)
 }
