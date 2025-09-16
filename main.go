@@ -42,13 +42,14 @@ type userResponse struct {
 }
 
 type task struct {
-    TaskOwnerID   string  `json:"task_owner_id"`   // ID_NO of the owner
-    TaskName      string  `json:"task_name"`
-    StartDateTime      string  `json:"start_date_time"`
-    EndDateTime      string  `json:"end_date_time"`       // Use time.Time if you want, but string for now
-    Location      string  `json:"location"`        // Store as string, e.g., "POINT(lon lat)"
-    MoreDetail    string  `json:"more_detail"`
-    TaskWorkerID  string  `json:"task_worker_id"`  // ID_NO of the worker
+    ID            int64  `json:"id,omitempty"` // changed from TaskID
+    TaskOwnerID   string `json:"task_owner_id"`
+    TaskName      string `json:"task_name"`
+    StartDateTime string `json:"start_date_time"`
+    EndDateTime   string `json:"end_date_time"`
+    Location      string `json:"location"`
+    MoreDetail    string `json:"more_detail"`
+    TaskWorkerID  string `json:"task_worker_id"`
 }
 
 type taskShowCaretaker struct {
@@ -59,10 +60,11 @@ type taskShowCaretaker struct {
 }
 
 type taskUserHistory struct {
-    TaskName       string `json:"task_name"`
-    StartDateTime  string `json:"start_date_time"`
-    EndDateTime    string `json:"end_date_time"`
-    CaretakerName  string `json:"caretaker_name"`
+    ID            int64   `json:"id"`
+    TaskName      string  `json:"task_name"`
+    StartDateTime string  `json:"start_date_time"`
+    EndDateTime   string  `json:"end_date_time"`
+    CaretakerName *string `json:"caretaker_name"` // pointer allows null
 }
 
 func main() {
@@ -75,6 +77,7 @@ func main() {
     router.POST("/tasks", postTask)
     router.GET("/tasks/caretaker", getTasksForCaretaker)
     router.GET("/tasks/user/history", getTaskUserHistory)
+    router.GET("/tasks/:task_id", getTask) // <-- Add this line
 
     router.Run("localhost:8080")
 }
@@ -170,15 +173,23 @@ func postTask(c *gin.Context) {
         return
     }
 
-    _, err := db.Exec(
+    result, err := db.Exec(
         "INSERT INTO tasks (task_owner_id, task_name, start_date_time, end_date_time, location, more_detail, task_worker_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
         newTask.TaskOwnerID, newTask.TaskName, newTask.StartDateTime, newTask.EndDateTime, newTask.Location, newTask.MoreDetail, newTask.TaskWorkerID,
     )
     if err != nil {
-        fmt.Println("DB error:", err) // Add this line for debugging
+        fmt.Println("DB error:", err)
         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
         return
     }
+
+    id, err := result.LastInsertId()
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve task ID"})
+        return
+    }
+    newTask.ID = id // Set the id
+
     c.IndentedJSON(http.StatusCreated, newTask)
 }
 
@@ -210,7 +221,7 @@ func getTasksForCaretaker(c *gin.Context) {
 func getTaskUserHistory(c *gin.Context) {
     userID := c.Query("user_id")
     rows, err := db.Query(`
-        SELECT t.task_name, t.start_date_time, t.end_date_time, u.fname
+        SELECT t.id, t.task_name, t.start_date_time, t.end_date_time, u.fname
         FROM tasks t
         LEFT JOIN users u ON t.task_worker_id = u.id
         WHERE t.task_owner_id = ?
@@ -224,7 +235,7 @@ func getTaskUserHistory(c *gin.Context) {
     var history []taskUserHistory
     for rows.Next() {
         var h taskUserHistory
-        err := rows.Scan(&h.TaskName, &h.StartDateTime, &h.EndDateTime, &h.CaretakerName)
+        err := rows.Scan(&h.ID, &h.TaskName, &h.StartDateTime, &h.EndDateTime, &h.CaretakerName)
         if err != nil {
             c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
             return
@@ -232,4 +243,24 @@ func getTaskUserHistory(c *gin.Context) {
         history = append(history, h)
     }
     c.IndentedJSON(http.StatusOK, history)
+}
+
+func getTask(c *gin.Context) {
+    taskID := c.Param("task_id")
+    var t task
+    err := db.QueryRow(`
+        SELECT id, task_owner_id, task_name, start_date_time, end_date_time, location, more_detail, task_worker_id
+        FROM tasks
+        WHERE id = ?
+    `, taskID).Scan(
+        &t.ID, &t.TaskOwnerID, &t.TaskName, &t.StartDateTime, &t.EndDateTime, &t.Location, &t.MoreDetail, &t.TaskWorkerID,
+    )
+    if err == sql.ErrNoRows {
+        c.JSON(http.StatusNotFound, gin.H{"message": "task not found"})
+        return
+    } else if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+    c.IndentedJSON(http.StatusOK, t)
 }
